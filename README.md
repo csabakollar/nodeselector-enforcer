@@ -1,0 +1,119 @@
+# NodeSelector Enforcer
+
+NodeSelector-enforcer is a mutating admission webhook (https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/#mutatingadmissionwebhook)
+meant to be deployed as a Google Function (https://cloud.google.com/functions/).
+
+It will respond to AdmissionReview requests from kubernetes clusters configured using this MAW and patch pods' specs to send them to nodes with matching labels (https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#nodeselector).
+
+At the moment the node label options are hard-coded:
+
+- system-processes
+- non-production
+- production
+
+You should label your nodes with these and the following rules will apply:
+
+- `SYSTEM_NAMESPACES` is an environment variable (coma separated, no spaces), which can be set for the Google Function.
+If the reviewed pod's namespace matches one of the system namespaces, the pod will be sent to a node which has the label `purpose: system-processes`
+- any namespace, which starts with prefix `prod-` will be sent to nodes with label `purpose: production`
+- any other pods, which didn't match the following 2 criteria will be sent to nodes with label `purpose: non-production`
+
+If users want to schedule their pods on for example the system-namespaces, this MAW will replace their `nodeSelector` setting
+preventing it happening.
+
+## When to use
+
+When you want to dedicated workloads to nodes/node pools on your kubernetes cluster.
+
+## How to deploy
+
+Run the following commands
+
+```
+git clone git@github.com:csabakollar/nodeselector-enforcer.git
+cd nodeselector-enforcer
+gcloud functions deploy nodeselector-enforcer --runtime go111 --entry-point EntryPoint --set-env-vars="SYSTEM_NAMESPACES=kube-system" --trigger-http --memory 128MB --project my-gcp-project-id
+```
+
+After the function was deployed successfully, grab the trigger URL:
+
+```
+gcloud functions describe nodeenforcer-golang --format json |jq -r .httpsTrigger.url
+```
+
+Finally create a mutating webhook configuration in your kubernetes cluster.
+
+```yaml
+apiVersion: admissionregistration.k8s.io/v1beta1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: nodeselector-enforcer
+webhooks:
+- clientConfig:
+    caBundle: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUlnakNDQjJxZ0F3SUJBZ0lJUVk2VnkzN2d2NHN3RFFZSktvWklodmNOQVFFTEJRQXdWREVMTUFrR0ExVUUKQmhNQ1ZWTXhIakFjQmdOVkJBb1RGVWR2YjJkc1pTQlVjblZ6ZENCVFpYSjJhV05sY3pFbE1DTUdBMVVFQXhNYwpSMjl2WjJ4bElFbHVkR1Z5Ym1WMElFRjFkR2h2Y21sMGVTQkhNekFlRncweE9EQTVNVGd4TWpNME1EQmFGdzB4Ck9ERXlNVEV4TWpNME1EQmFNR1l4Q3pBSkJnTlZCQVlUQWxWVE1STXdFUVlEVlFRSURBcERZV3hwWm05eWJtbGgKTVJZd0ZBWURWUVFIREExTmIzVnVkR0ZwYmlCV2FXVjNNUk13RVFZRFZRUUtEQXBIYjI5bmJHVWdURXhETVJVdwpFd1lEVlFRRERBd3FMbWR2YjJkc1pTNWpiMjB3Z2dFaU1BMEdDU3FHU0liM0RRRUJBUVVBQTRJQkR3QXdnZ0VLCkFvSUJBUUNYcUF6RTNRME5SaFIxMUpZOTUxWktXd1NFMmxUdFdIT2ZNcWpKdGxlK244UlppcXNDNFJxdVlOOXgKdlhZZUhWM1k2R3pnY3pGM0d2K0loWms0Qm1RcFgvQ0NEMlFYd2dwREwxYlJidzhGWFJLTXhjN0lpeVpzNTVuYQpsK0dmQnNwR0hyY1NFQVhKaklXSnEyWDAwdlBqdUFLeWE2WTlLVGF5TWtHQ01jdjhFZ1l6TENvVzJzK2k1VDU0CkhSUSt5RFdCWUhzTFBYV2QvdCs3VkZYR0JiYjQ3Q1drcWJsMVl1Uzc0VXpGd1cwMUhtNjNZVkNDc0tKTm5JWEkKWkxWSVI1ek9BSnY2aGo5aXZTejZVRnpqK1pESGdiSExhWWhLcnRHeGRuQkd6Wm12RjdDakxQVTBrVE01eEFnbApKL0V3NTVWTUhWOFViNnYyeGdhdENDanUzMGFOQWdNQkFBR2pnZ1ZFTUlJRlFEQVRCZ05WSFNVRUREQUtCZ2dyCkJnRUZCUWNEQVRDQ0JCa0dBMVVkRVFTQ0JCQXdnZ1FNZ2d3cUxtZHZiMmRzWlM1amIyMkNEU291WVc1a2NtOXAKWkM1amIyMkNGaW91WVhCd1pXNW5hVzVsTG1kdmIyZHNaUzVqYjIyQ0Vpb3VZMnh2ZFdRdVoyOXZaMnhsTG1OdgpiWUlHS2k1bkxtTnZnZzRxTG1kamNDNW5kblF5TG1OdmJZSUtLaTVuWjNCb2RDNWpib0lXS2k1bmIyOW5iR1V0CllXNWhiSGwwYVdOekxtTnZiWUlMS2k1bmIyOW5iR1V1WTJHQ0N5b3VaMjl2WjJ4bExtTnNnZzRxTG1kdmIyZHMKWlM1amJ5NXBib0lPS2k1bmIyOW5iR1V1WTI4dWFuQ0NEaW91WjI5dloyeGxMbU52TG5WcmdnOHFMbWR2YjJkcwpaUzVqYjIwdVlYS0NEeW91WjI5dloyeGxMbU52YlM1aGRZSVBLaTVuYjI5bmJHVXVZMjl0TG1KeWdnOHFMbWR2CmIyZHNaUzVqYjIwdVkyK0NEeW91WjI5dloyeGxMbU52YlM1dGVJSVBLaTVuYjI5bmJHVXVZMjl0TG5SeWdnOHEKTG1kdmIyZHNaUzVqYjIwdWRtNkNDeW91WjI5dloyeGxMbVJsZ2dzcUxtZHZiMmRzWlM1bGM0SUxLaTVuYjI5bgpiR1V1Wm5LQ0N5b3VaMjl2WjJ4bExtaDFnZ3NxTG1kdmIyZHNaUzVwZElJTEtpNW5iMjluYkdVdWJteUNDeW91CloyOXZaMnhsTG5Cc2dnc3FMbWR2YjJkc1pTNXdkSUlTS2k1bmIyOW5iR1ZoWkdGd2FYTXVZMjl0Z2c4cUxtZHYKYjJkc1pXRndhWE11WTI2Q0ZDb3VaMjl2WjJ4bFkyOXRiV1Z5WTJVdVkyOXRnaEVxTG1kdmIyZHNaWFpwWkdWdgpMbU52YllJTUtpNW5jM1JoZEdsakxtTnVnZzBxTG1kemRHRjBhV011WTI5dGdoSXFMbWR6ZEdGMGFXTmpibUZ3CmNITXVZMjZDQ2lvdVozWjBNUzVqYjIyQ0Npb3VaM1owTWk1amIyMkNGQ291YldWMGNtbGpMbWR6ZEdGMGFXTXUKWTI5dGdnd3FMblZ5WTJocGJpNWpiMjJDRUNvdWRYSnNMbWR2YjJkc1pTNWpiMjJDRmlvdWVXOTFkSFZpWlMxdQpiMk52YjJ0cFpTNWpiMjJDRFNvdWVXOTFkSFZpWlM1amIyMkNGaW91ZVc5MWRIVmlaV1ZrZFdOaGRHbHZiaTVqCmIyMkNFU291ZVc5MWRIVmlaV3RwWkhNdVkyOXRnZ2NxTG5sMExtSmxnZ3NxTG5sMGFXMW5MbU52YllJYVlXNWsKY205cFpDNWpiR2xsYm5SekxtZHZiMmRzWlM1amIyMkNDMkZ1WkhKdmFXUXVZMjl0Z2h0a1pYWmxiRzl3WlhJdQpZVzVrY205cFpDNW5iMjluYkdVdVkyNkNIR1JsZG1Wc2IzQmxjbk11WVc1a2NtOXBaQzVuYjI5bmJHVXVZMjZDCkJHY3VZMitDQ0dkbmNHaDBMbU51Z2dabmIyOHVaMnlDRkdkdmIyZHNaUzFoYm1Gc2VYUnBZM011WTI5dGdncG4KYjI5bmJHVXVZMjl0Z2hKbmIyOW5iR1ZqYjIxdFpYSmpaUzVqYjIyQ0dITnZkWEpqWlM1aGJtUnliMmxrTG1kdgpiMmRzWlM1amJvSUtkWEpqYUdsdUxtTnZiWUlLZDNkM0xtZHZieTVuYklJSWVXOTFkSFV1WW1XQ0MzbHZkWFIxClltVXVZMjl0Z2hSNWIzVjBkV0psWldSMVkyRjBhVzl1TG1OdmJZSVBlVzkxZEhWaVpXdHBaSE11WTI5dGdnVjUKZEM1aVpUQm9CZ2dyQmdFRkJRY0JBUVJjTUZvd0xRWUlLd1lCQlFVSE1BS0dJV2gwZEhBNkx5OXdhMmt1WjI5dgpaeTluYzNJeUwwZFVVMGRKUVVjekxtTnlkREFwQmdnckJnRUZCUWN3QVlZZGFIUjBjRG92TDI5amMzQXVjR3RwCkxtZHZiMmN2UjFSVFIwbEJSek13SFFZRFZSME9CQllFRkpBK21BeXQ4V0FPNk1lM1ZIbTJNWkJDQzhoK01Bd0cKQTFVZEV3RUIvd1FDTUFBd0h3WURWUjBqQkJnd0ZvQVVkOEs0VUpwbmRuYXhMY0tHMElPZ2ZxWit1a3N3SVFZRApWUjBnQkJvd0dEQU1CZ29yQmdFRUFkWjVBZ1VETUFnR0JtZUJEQUVDQWpBeEJnTlZIUjhFS2pBb01DYWdKS0FpCmhpQm9kSFJ3T2k4dlkzSnNMbkJyYVM1bmIyOW5MMGRVVTBkSlFVY3pMbU55YkRBTkJna3Foa2lHOXcwQkFRc0YKQUFPQ0FRRUFjZWpBZDFrNi83blRxekgwQzArVjkxbDFodU5aWUZEakM1T3pWaWhaOUNEZ3IvWURBUVloaVE0SQpxU2VseEEyR2xrS3M5c2dGWTk1UWZwZU1MSVhJYnRVZHc4UHRhNWUvUCt2OU9YcDZyMjRYQmhlbVl3RFFTdE5pCjg1Umk4RFpEb1NGa3VyZnJROGZPTTRxU1BGTnhvMWJOUjdncThhT3lWL3lIVEgzdUJWZTRxZ0JQeUVPWmlvcEYKZDhzdVBTV09pV1pxcmU4YWZSdVNHQ1JSU1Nud0d2VzNyZndkcEdqWDZJTURwRXRQTnZQbGhKUW5YYU5CcWNTMgo0dFdCUmF2K3luaTJoaGR1RHhxRXZ3UHFGUnU2ZExoWXMyQmlVVmxIYytYL3k1d2d4UUR6ZnFNK2xaMm1HR1MvCkdvS3ZkTmxQOGk5ZjlWTTBKbEFaT3NmSUZlYVFDdz09Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0KLS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUVYRENDQTBTZ0F3SUJBZ0lOQWVPcE1CejhjZ1k0UDVwVEhUQU5CZ2txaGtpRzl3MEJBUXNGQURCTU1TQXcKSGdZRFZRUUxFeGRIYkc5aVlXeFRhV2R1SUZKdmIzUWdRMEVnTFNCU01qRVRNQkVHQTFVRUNoTUtSMnh2WW1GcwpVMmxuYmpFVE1CRUdBMVVFQXhNS1IyeHZZbUZzVTJsbmJqQWVGdzB4TnpBMk1UVXdNREF3TkRKYUZ3MHlNVEV5Ck1UVXdNREF3TkRKYU1GUXhDekFKQmdOVkJBWVRBbFZUTVI0d0hBWURWUVFLRXhWSGIyOW5iR1VnVkhKMWMzUWcKVTJWeWRtbGpaWE14SlRBakJnTlZCQU1USEVkdmIyZHNaU0JKYm5SbGNtNWxkQ0JCZFhSb2IzSnBkSGtnUnpNdwpnZ0VpTUEwR0NTcUdTSWIzRFFFQkFRVUFBNElCRHdBd2dnRUtBb0lCQVFES1VrdnFIdi9PSkd1bzJuSVlhTlZXClhRNUlXaTAxQ1haYXo2VElITEdwL2xPSis2MDAvNGhibjd2bjZBQUIzRFZ6ZFFPdHM3RzVwSDBySm5uT0ZVQUsKNzFHNG56S01mSENHVWtzVy9tb25hK1kyZW1KUTJOK2FpY3dKS2V0UEtSU0lnQXVQT0I2QWFoaDhIYjJYTzNoOQpSVWsyVDBITm91QjJWenhvTVhsa3lXN1hVUjVtdzZKa0xIbkE1MlhEVm9SVFdrTnR5NW9DSU5MdkdtblJzSjF6Cm91QXFZR1ZRTWMvN3N5Ky9FWWhBTHJWSkVBOEtidHlYK3I4c253VTVDMWhVcndhVzZNV09BUmE4cUJwTlFjV1QKa2FJZW9Zdnkvc0dJSkVtalIwdkZFd0hkcDFjU2FXSXI2LzRnNzJuN09xWHdmaW51N1pZVzk3RWZvT1NRSmVBegpBZ01CQUFHamdnRXpNSUlCTHpBT0JnTlZIUThCQWY4RUJBTUNBWVl3SFFZRFZSMGxCQll3RkFZSUt3WUJCUVVICkF3RUdDQ3NHQVFVRkJ3TUNNQklHQTFVZEV3RUIvd1FJTUFZQkFmOENBUUF3SFFZRFZSME9CQllFRkhmQ3VGQ2EKWjNaMnNTM0NodENEb0g2bWZycExNQjhHQTFVZEl3UVlNQmFBRkp2aUIxZG5IQjdBYWdiZVdiU2FMZC9jR1lZdQpNRFVHQ0NzR0FRVUZCd0VCQkNrd0p6QWxCZ2dyQmdFRkJRY3dBWVlaYUhSMGNEb3ZMMjlqYzNBdWNHdHBMbWR2CmIyY3ZaM055TWpBeUJnTlZIUjhFS3pBcE1DZWdKYUFqaGlGb2RIUndPaTh2WTNKc0xuQnJhUzVuYjI5bkwyZHoKY2pJdlozTnlNaTVqY213d1B3WURWUjBnQkRnd05qQTBCZ1puZ1F3QkFnSXdLakFvQmdnckJnRUZCUWNDQVJZYwphSFIwY0hNNkx5OXdhMmt1WjI5dlp5OXlaWEJ2YzJsMGIzSjVMekFOQmdrcWhraUc5dzBCQVFzRkFBT0NBUUVBCkhMZUpsdVJUN2J2czI2Z3lBWjhzbzgxdHJVSVNkN080NXNrRFVtQWdlMWNueGhHMVAyY05tU3hiV3NvaUN0MmUKdXg5TFNEK1BBajJMSVlSRkhXMzEvNnhvaWMxazR0YldYa0RDamlyMzd4VFROcVJBTVBVeUZSV1NkdnQrbmxQcQp3bmI4T2EySS9tYVNKdWtjeERqTlNmcERoL0JkMWxaTmdkZC84Y0xkc0UzK3d5cHVmSjl1WE8xaVFwbmg5emJ1CkZJd3NJT05HbDFwM0E4Q2d4a3FJL1VBaWgzSmFHT3FjcGNkYUNJemtCYVI5dVlRMVg0azJWZzVBUFJMb3V6VnkKN2E4SVZrNnd1eTZwbStUN0hUNExZOGliUzVGRVpsZkFGTFNXOE53c1Z6OVNCSzJWcW4xTjBQSU1uNXhBNk5aVgpjN284MzVETEFGc2hFV2ZDN1RJZTNnPT0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+    url: __PASTE_HERE_YOUR_FUNCTIONS_TRIGGER_URL__
+  failurePolicy: Fail
+  name: node.selector.enforceme.nt
+  namespaceSelector: {}
+  rules:
+  - apiGroups:
+    - ""
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    resources:
+    - pods
+```
+
+The CA bundle is Google's. The reason I chose this solution instead of deploying this MAW as a deployment in my kubernetes clusters is because:
+
+- I don't need to fool around with self-signed certs
+- the code is simpler
+- I only need to deploy this once and share it on all of my kubernetes clusters
+
+## Testing
+
+Create 2 namespaces:
+
+```
+kubectl create ns test
+kubectl create ns prod-test
+```
+
+Run:
+
+```
+kubectl run -it --rm alpine --image=alpine --restart=Never --namespace=test
+```
+
+In another shell, verify that everything is correct:
+
+```
+kubectl get pod alpine -o wide
+kubectl describe pod alpine
+```
+
+`-o wide` should show, that the pod is trying to start on a node, which matched the criteria (the node is labelled with `purpose: non-production`)
+
+Describe will show that the `nodeSelector` option is injected.
+
+You can repeat this for the `prod-test` and `kube-system` namespaces to see if they are working.
+
+If your pod is unschedulable, that means that there is no node which has the required label(s).
+
+To label your node, run:
+
+```
+kubectl label node <nodename> purpose=production
+```
+
+OR use GKE, where you can set labels for your node pools :).
+
+# Disclaimer
+
+I am just learning Go. This for me was to practice, so if the code is unusual, you know why :).
+
+Later, I'm planning to add a Dockerfile, self-signed cert and deployment files, so this MAW can be deployed as a pod in a kubernetes, so it's not externally exposed.
+
+Any feedback is welcomed!
