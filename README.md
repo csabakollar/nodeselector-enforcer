@@ -1,3 +1,7 @@
+[![Build Status](https://travis-ci.org/csabakollar/nodeselector-enforcer.svg?branch=master)](https://travis-ci.org/csabakollar/nodeselector-enforcer)
+[![GoDoc](https://godoc.org/github.com/csabakollar/nodeselector-enforcer?status.svg)](https://godoc.org/github.com/csabakollar/nodeselector-enforcer)
+[![Go Report Card](https://goreportcard.com/badge/github.com/csabakollar/nodeselector-enforcer)](https://goreportcard.com/report/github.com/csabakollar/nodeselector-enforcer)
+
 # NodeSelector Enforcer
 
 NodeSelector-enforcer is a mutating admission webhook (https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/#mutatingadmissionwebhook)

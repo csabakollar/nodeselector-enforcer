@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/csabakollar/nodeselector-enforcer"
@@ -11,5 +12,7 @@ import (
 func main() {
 	http.HandleFunc("/", nodeselector.EntryPoint)
 	fmt.Println("Listening on port 80")
-	http.ListenAndServe(":80", nil)
+	if err := http.ListenAndServe(":80", nil); err != nil {
+		log.Fatalf("Cannot start HTTP server: %v", err)
+	}
 }

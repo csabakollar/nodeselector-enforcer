@@ -159,5 +159,8 @@ func EntryPoint(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	io.WriteString(w, getEnv("VERSION", "no version was specified"))
+	if _, err := io.WriteString(w, getEnv("VERSION", "no version was specified")); err != nil {
+		log.Printf("Cannot report version: %v", err)
+		http.Error(w, fmt.Sprintf("could not report version: %v", err), http.StatusInternalServerError)
+	}
 }
